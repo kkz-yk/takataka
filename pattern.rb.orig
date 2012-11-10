@@ -1,0 +1,105 @@
+# encoding: utf-8
+def pattern_analysis(takker, now_time, old_time)
+  # 準備
+  # rhythmAを追加したデータに, rhythmBを既存のデータに
+  db = SQLite3::Database.open("data.db")
+  $rhythmA = []
+  rhythm = db.execute("select lap from taka where twitter_name = ? and submit_date = ?", takker, now_time)
+  rhythm[0][0].split(/\s*,\s*/).each{|temp|
+    $rhythmA << temp.to_f
+  }
+  p $rhythmA.length
+
+  $rhythmB = []
+  rhythm = db.execute("select lap from taka where twitter_name = ? and submit_date = ?", takker, old_time)
+  rhythm[0][0].split(/\s*,\s*/).each{|temp|
+    $rhythmB << temp.to_f
+  }
+  p $rhythmA.length
+  db.close
+  check_interval(takker, now_time)
+end
+
+def check_interval(takker, now_time)
+  puts "check_interval"
+  temp_pattern = []
+
+  for a in 0..$rhythmA.length-2
+    intervalA[a] = $rhythmA[a + 1]*1000000 - $rhythmA[a]*1000000
+  end
+
+  for b in 0..$rhythmB.length-2
+    intervalB[b] = $rhythmB[b + 1]*1000000 - $rhythmB[b]*1000000
+  end
+
+  for head in 0..intervalB.length-1
+    for a, b in [0..intervalA.length-1, head..intervalB.length-1]
+      if intervalA[a] % intervalB[b] <= 100
+        temp_pattern << b
+      end
+    end
+    check_pattern(temp_pattern, takker, now_time)
+    temp_pattern.clear
+  end
+end
+
+def check_pattern(temp_pattern, takker, now_time)
+  pattern_flg = 0
+  cont = 0
+  for i in 0..temp_pattern.length-2
+    if (temp_pattern[i] - temp_pattern[i + 1]).abs == 1
+      pattern_flg = 1
+      cont += 1
+      next
+    end
+
+    if pattern_flg == 0
+    else
+      pattern_flg = 0
+      if cont < 3
+        cnt = 0
+      else
+        # temp_pattern[i-cont..i]がパターン これをDBに保存
+        write_db(takker, now_time, temp_pattern[i-cont..i])
+      end
+    end
+  end
+end
+
+def write_db(takker, now_time, *pattern_num)
+  begin
+    db = SQLite3::Database.new("pattern.db")
+    sql = <<SQL
+CREATE TABLE pattern_t (
+  takker text,
+  pattern text,
+  submit_date text,
+  number_of_time int
+);
+SQL
+  db.execute(sql)
+  rescue
+    db = SQLite3::Database.open("pattern.db")
+  end
+
+  pattern_list = ""
+  pattern_num.each{|num|
+    pattern_list << $rhythmB[num].to_s + ","
+  }
+  pattern_list << $rhythmB[pattern_num.pop + 1].to_s
+
+  # 同じリズムパターンでもinsertになってるのをなおす
+  date_time = db.execute("select submit_date, number_time from pattern_t where takker = ? and pattern = ?", takker, pattern_list)
+  date_time.flatten
+  if date_time[1] != 0
+    # 同じリズムパターンがある
+    date_time[0] << "," + now_time
+    date_time[1] += 1
+    db.execute("update pattern_t set submit_date = ?, number_of_time = ? where takker = ? and pattern = ?", date_time[0], date_time[1], takker, pattern_list)
+  else
+    # 同じリズムパターンが無い
+    number_time = 1
+    db.execute("insert into pattern_t values (?, ?, ?, ?)", takker, pattern_list, now_time, number_time)
+  end
+  db.close
+end
